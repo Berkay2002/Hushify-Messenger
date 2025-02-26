@@ -1,4 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+'use client';
+
+import React, { useEffect, useRef, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { useChat } from '../../context/ChatContext';
 import { useAuth } from '../../context/AuthContext';
@@ -9,11 +11,50 @@ const MessageList: React.FC = () => {
   const { user } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { decryptMessage } = useEncryption();
+  const [decryptedContent, setDecryptedContent] = useState<Record<string, string>>({});
   
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activeContact?.id]);
+  
+  // Decrypt messages when they change
+  useEffect(() => {
+    if (!activeContact) return;
+    
+    const conversationMessages = messages[activeContact.conversationId] || [];
+    
+    // Mark unread messages as read
+    conversationMessages.forEach((message) => {
+      if (message.sender === activeContact.contactId && !message.isRead) {
+        markAsRead(message.id, message.sender);
+      }
+    });
+    
+    // Decrypt message content
+    const processMessages = async () => {
+      const newDecryptedContent: Record<string, string> = {};
+      
+      for (const message of conversationMessages) {
+        try {
+          if (message.sender === user?.id) {
+            // It's our message, we already know the content
+            newDecryptedContent[message.id] = message.content;
+          } else {
+            // Decrypt the message from sender
+            newDecryptedContent[message.id] = await decryptMessage(message.sender, message.content);
+          }
+        } catch (error) {
+          console.error('Failed to decrypt message:', error);
+          newDecryptedContent[message.id] = '[Encrypted message - unable to decrypt]';
+        }
+      }
+      
+      setDecryptedContent(newDecryptedContent);
+    };
+    
+    processMessages();
+  }, [messages, activeContact, user, decryptMessage, markAsRead]);
   
   if (!activeContact) return null;
   
@@ -21,8 +62,7 @@ const MessageList: React.FC = () => {
   const isTyping = typingUsers[activeContact.contactId];
   
   // Group messages by date
-  
-interface Message {
+  interface Message {
     id: string;
     sender: string;
     recipient: string;
@@ -32,42 +72,21 @@ interface Message {
     timestamp: Date;
     isRead: boolean;
     status?: 'read' | 'delivered' | 'sent';
-}
+  }
 
-interface GroupedMessages {
+  interface GroupedMessages {
     [date: string]: Message[];
-}
+  }
 
-const groupedMessages: GroupedMessages = {};
+  const groupedMessages: GroupedMessages = {};
 
-conversationMessages.forEach((message: Message) => {
+  conversationMessages.forEach((message: Message) => {
     const date = new Date(message.timestamp).toLocaleDateString();
     if (!groupedMessages[date]) {
-        groupedMessages[date] = [];
+      groupedMessages[date] = [];
     }
     groupedMessages[date].push(message);
-    
-    // Mark unread messages as read
-    if (message.sender === activeContact.contactId && !message.isRead) {
-        markAsRead(message.id, message.sender);
-    }
-});
-  
-  // Decrypt message content
-  const getDecryptedContent = async (message: typeof conversationMessages[0]) => {
-    if (message.sender === user?.id) {
-      // It's our message, we already know the content
-      return message.content;
-    }
-    
-    try {
-      // Try to decrypt the message
-      return await decryptMessage(message.sender, message.content);
-    } catch (error) {
-      console.error('Failed to decrypt message:', error);
-      return '[Encrypted message - unable to decrypt]';
-    }
-  };
+  });
 
   if (loadingMessages) {
     return (
@@ -118,7 +137,8 @@ conversationMessages.forEach((message: Message) => {
                     : 'bg-white text-gray-800 rounded-bl-none shadow'
                 }`}
               >
-                <p>{getDecryptedContent(message)}</p>
+                {/* Use decrypted content from state */}
+                <p>{decryptedContent[message.id] || "Decrypting..."}</p>
                 <div className={`text-xs mt-1 flex items-center justify-end ${
                   message.sender === user?.id ? 'text-blue-100' : 'text-gray-500'
                 }`}>

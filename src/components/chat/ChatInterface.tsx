@@ -1,5 +1,7 @@
 /* eslint-disable jsx-a11y/alt-text */
 /* eslint-disable @typescript-eslint/no-unused-vars */
+'use client';
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Smile, Paperclip, Image } from 'lucide-react';
 import { useChat } from '../../context/ChatContext';
@@ -16,27 +18,38 @@ const ChatInterface: React.FC = () => {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { encryptMessage } = useEncryption();
+  const [isSending, setIsSending] = useState(false);
 
   // Handle sending messages
-  const handleSendMessage = async () => {
-    if (!message.trim() || !activeContact || !user) return;
+  const handleSendMessage = () => {
+    if (!message.trim() || !activeContact || !user || isSending) return;
 
-    try {
-      // Encrypt the message before sending
-      const encryptedContent = await encryptMessage(activeContact.contactId, message);
-      
-      // Send the encrypted message
-      await sendMessage(encryptedContent);
-      
-      // Clear input
-      setMessage('');
-      
-      // Stop typing indicator
-      handleStopTyping();
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      // Show error to user
-    }
+    setIsSending(true);
+    
+    // Encrypt and send in a non-rendering function
+    const sendMessageAsync = async () => {
+      try {
+        // Encrypt the message before sending
+        const encryptedContent = await encryptMessage(activeContact.contactId, message);
+        
+        // Send the encrypted message
+        await sendMessage(encryptedContent);
+        
+        // Clear input
+        setMessage('');
+        
+        // Stop typing indicator
+        handleStopTyping();
+      } catch (error) {
+        console.error('Failed to send message:', error);
+        // Show error to user
+      } finally {
+        setIsSending(false);
+      }
+    };
+    
+    // Call the async function
+    sendMessageAsync();
   };
 
   // Handle typing indicator
@@ -127,17 +140,18 @@ const ChatInterface: React.FC = () => {
               onKeyDown={handleKeyPress}
               rows={1}
               style={{ maxHeight: '120px', minHeight: '40px' }}
+              disabled={isSending}
             />
           </div>
           
           <button 
             className={`p-2 ml-2 rounded-full flex items-center justify-center ${
-              message.trim() 
+              message.trim() && !isSending
                 ? 'bg-blue-600 text-white hover:bg-blue-700' 
                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
             }`}
             onClick={handleSendMessage}
-            disabled={!message.trim()}
+            disabled={!message.trim() || isSending}
           >
             <Send className="h-5 w-5" />
           </button>
