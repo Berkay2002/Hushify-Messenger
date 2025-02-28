@@ -1,3 +1,5 @@
+// src/app/api/keys/[userId]/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '../../../../lib/db';
 import User from '../../../../models/user';
@@ -24,53 +26,32 @@ export async function GET(
     await connectToDatabase();
     
     // Get target user
-    const targetUser = await User.findById(userId)
-      .select('+identityKey')
-      .lean();
+    const targetUser = await User.findById(userId);
     
-    if (!targetUser || Array.isArray(targetUser)) {
+    if (!targetUser) {
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
       );
     }
     
-    // Check if keys exist
-    if (!targetUser.identityKey || !targetUser.signedPreKey) {
+    // Check if public key exists
+    if (!targetUser.publicKey) {
       return NextResponse.json(
-        { error: 'User has not registered encryption keys' },
-        { status: 400 }
+        { error: 'User has not registered a public key' },
+        { status: 404 }
       );
-    }
-    
-    // Get a one-time pre-key (if available)
-    let oneTimePreKey = null;
-    
-    if (targetUser.oneTimePreKeys && targetUser.oneTimePreKeys.length > 0) {
-      // Get a random one-time pre-key
-      const randomIndex = Math.floor(Math.random() * targetUser.oneTimePreKeys.length);
-      oneTimePreKey = targetUser.oneTimePreKeys[randomIndex];
-      
-      // Remove the used one-time pre-key
-      await User.findByIdAndUpdate(userId, {
-        $pull: { oneTimePreKeys: { keyId: oneTimePreKey.keyId } },
-      });
     }
     
     return NextResponse.json({
       success: true,
-      preKeyBundle: {
-        identityKey: targetUser.identityKey,
-        signedPreKey: targetUser.signedPreKey,
-        oneTimePreKey,
-        registrationId: targetUser._id, // Use user ID as registration ID
-      },
+      publicKey: targetUser.publicKey,
     });
   } catch (error) {
-    console.error('Get pre-key bundle error:', error);
+    console.error('Get user public key error:', error);
     
     return NextResponse.json(
-      { error: 'Failed to get pre-key bundle' },
+      { error: 'Failed to get user public key' },
       { status: 500 }
     );
   }

@@ -1,60 +1,115 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Lock } from 'lucide-react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Lock, Shield } from 'lucide-react';
 import { useChat } from '../../context/ChatContext';
 import { useAuth } from '../../context/AuthContext';
-import { useEncryption } from '../../hooks/useEncryption';
+import { useSecureMessaging } from '../../hooks/useSecureMessaging';
 
 const MessageList: React.FC = () => {
   const { activeContact, messages, loadingMessages, typingUsers, markAsRead } = useChat();
   const { user } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { decryptMessage } = useEncryption();
+  const { decryptMessage, initialized } = useSecureMessaging();
   const [decryptedContent, setDecryptedContent] = useState<Record<string, string>>({});
+  const [decryptionErrors, setDecryptionErrors] = useState<Record<string, boolean>>({});
+  const processedMessagesRef = useRef<Set<string>>(new Set());
+  const isProcessingRef = useRef(false);
   
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activeContact?.id]);
   
-  // Decrypt messages when they change
-  useEffect(() => {
-    if (!activeContact) return;
+  // Process a single message - wrapped in useCallback to prevent recreation
+  const processMessage = useCallback(async (message: Message) => {
+    // Skip if already processed
+    if (processedMessagesRef.current.has(message.id)) {
+      return decryptedContent[message.id];
+    }
+    
+    try {
+      let content;
+      if (message.sender === user?.id) {
+        // For own messages - try to decrypt, fall back to raw content
+        try {
+          content = await decryptMessage(activeContact?.contactId || "", message.content);
+        } catch (err) {
+          console.warn('Failed to decrypt own message, showing original:', err);
+          content = message.content;
+        }
+      } else {
+        // For others' messages, attempt decryption
+        content = await decryptMessage(message.sender, message.content);
+      }
+      return content;
+    } catch (err) {
+      console.error('Failed to decrypt message:', err);
+      return "[Encrypted message]";
+    }
+  }, [user?.id, activeContact?.contactId, decryptMessage, decryptedContent]);
+  
+  // Batched message processing
+  const processMessages = useCallback(async () => {
+    if (!activeContact || !initialized || isProcessingRef.current) return;
     
     const conversationMessages = messages[activeContact.conversationId] || [];
+    if (conversationMessages.length === 0) return;
     
-    // Mark unread messages as read
-    conversationMessages.forEach((message) => {
-      if (message.sender === activeContact.contactId && !message.isRead) {
-        markAsRead(message.id, message.sender);
-      }
-    });
+    isProcessingRef.current = true;
     
-    // Decrypt message content
-    const processMessages = async () => {
-      const newDecryptedContent: Record<string, string> = {};
+    try {
+      // Mark unread messages as read
+      conversationMessages.forEach((message) => {
+        if (message.sender === activeContact.contactId && !message.isRead) {
+          markAsRead(message.id, message.sender);
+        }
+      });
       
-      for (const message of conversationMessages) {
+      // Process only new messages
+      const newMessages = conversationMessages.filter(
+        (msg) => !processedMessagesRef.current.has(msg.id)
+      );
+      
+      if (newMessages.length === 0) return;
+      
+      // Process in batches
+      const results: Record<string, string> = {};
+      const errors: Record<string, boolean> = {};
+      
+      for (const message of newMessages) {
         try {
-          if (message.sender === user?.id) {
-            // It's our message, we already know the content
-            newDecryptedContent[message.id] = message.content;
-          } else {
-            // Decrypt the message from sender
-            newDecryptedContent[message.id] = await decryptMessage(message.sender, message.content);
-          }
-        } catch (error) {
-          console.error('Failed to decrypt message:', error);
-          newDecryptedContent[message.id] = '[Encrypted message - unable to decrypt]';
+          results[message.id] = await processMessage(message);
+          processedMessagesRef.current.add(message.id);
+        } catch (err) {
+          errors[message.id] = true;
+          results[message.id] = "[Decryption failed]";
+          processedMessagesRef.current.add(message.id);
         }
       }
       
-      setDecryptedContent(newDecryptedContent);
-    };
-    
-    processMessages();
-  }, [messages, activeContact, user, decryptMessage, markAsRead]);
+      // Update state once with all results
+      setDecryptedContent(prev => ({...prev, ...results}));
+      setDecryptionErrors(prev => ({...prev, ...errors}));
+    } finally {
+      isProcessingRef.current = false;
+    }
+  }, [activeContact, messages, initialized, markAsRead, processMessage]);
+  
+  // Trigger message processing when dependencies change
+  useEffect(() => {
+    if (activeContact && initialized && !isProcessingRef.current) {
+      processMessages();
+    }
+  }, [activeContact, messages, initialized, processMessages]);
+  
+  // Reset processed messages when active contact changes
+  useEffect(() => {
+    if (activeContact) {
+      processedMessagesRef.current = new Set();
+    }
+  }, [activeContact]);
   
   if (!activeContact) return null;
   
@@ -96,13 +151,15 @@ const MessageList: React.FC = () => {
     );
   }
 
+  
+
   return (
     <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
       {/* Encryption notice */}
       <div className="flex justify-center mb-6">
-        <div className="flex items-center text-xs text-gray-500">
+        <div className="flex items-center text-xs bg-blue-50 text-blue-600 rounded-full px-3 py-1 shadow-sm">
           <Lock className="h-3 w-3 mr-1" />
-          Messages are end-to-end encrypted. No one outside this chat can read them.
+          Messages are end-to-end encrypted. Only you and {activeContact.name} can read them.
         </div>
       </div>
       
@@ -110,7 +167,10 @@ const MessageList: React.FC = () => {
       {conversationMessages.length === 0 && (
         <div className="flex justify-center">
           <div className="bg-white p-4 rounded-lg shadow-sm text-center">
-            <p className="text-gray-600">No messages yet.</p>
+            <div className="flex justify-center mb-3">
+              <Shield className="h-8 w-8 text-blue-500" />
+            </div>
+            <p className="text-gray-700 font-medium">Your conversation with {activeContact.name} is secure</p>
             <p className="text-gray-500 text-sm mt-1">Send a message to start the conversation!</p>
           </div>
         </div>
@@ -137,8 +197,22 @@ const MessageList: React.FC = () => {
                     : 'bg-white text-gray-800 rounded-bl-none shadow'
                 }`}
               >
-                {/* Use decrypted content from state */}
-                <p>{decryptedContent[message.id] || "Decrypting..."}</p>
+                {/* Decryption error indicator */}
+                {decryptionErrors[message.id] && (
+                  <div className="flex items-center text-xs text-red-300 mb-1">
+                    <Shield className="h-3 w-3 mr-1" />
+                    Cannot decrypt message
+                  </div>
+                )}
+                
+                {/* Message content */}
+                <p>
+                  {decryptedContent[message.id] || (
+                    <span className="italic text-sm">Decrypting...</span>
+                  )}
+                </p>
+                
+                {/* Message timestamp and status */}
                 <div className={`text-xs mt-1 flex items-center justify-end ${
                   message.sender === user?.id ? 'text-blue-100' : 'text-gray-500'
                 }`}>

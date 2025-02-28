@@ -4,23 +4,12 @@ import connectToDatabase from '../../../lib/db';
 import User from '../../../models/user';
 import { authMiddleware } from '../../../lib/auth';
 
-// Input validation schema for registering keys
-const registerKeysSchema = z.object({
-  identityKey: z.string().min(1, 'Identity key is required'),
-  signedPreKey: z.object({
-    keyId: z.number(),
-    publicKey: z.string().min(1, 'Public key is required'),
-    signature: z.string().min(1, 'Signature is required'),
-  }),
-  oneTimePreKeys: z.array(
-    z.object({
-      keyId: z.number(),
-      publicKey: z.string().min(1, 'Public key is required'),
-    })
-  ).min(1, 'At least one one-time pre key is required'),
+// Input validation schema
+const keySchema = z.object({
+  publicKey: z.string().min(1, 'Public key is required'),
 });
 
-// Register encryption keys
+// Store user's public key
 export async function POST(request: NextRequest) {
   try {
     // Authenticate user
@@ -37,7 +26,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     
     // Validate input
-    const validationResult = registerKeysSchema.safeParse(body);
+    const validationResult = keySchema.safeParse(body);
     
     if (!validationResult.success) {
       return NextResponse.json(
@@ -46,33 +35,31 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    const { identityKey, signedPreKey, oneTimePreKeys } = validationResult.data;
+    const { publicKey } = validationResult.data;
     
     // Connect to database
     await connectToDatabase();
     
-    // Update user with keys
+    // Update user with public key
     await User.findByIdAndUpdate(user.userId, {
-      identityKey,
-      signedPreKey,
-      oneTimePreKeys,
+      publicKey: publicKey,
     });
     
     return NextResponse.json({
       success: true,
-      message: 'Keys registered successfully',
+      message: 'Public key stored successfully',
     });
   } catch (error) {
-    console.error('Register keys error:', error);
+    console.error('Store public key error:', error);
     
     return NextResponse.json(
-      { error: 'Failed to register keys' },
+      { error: 'Failed to store public key' },
       { status: 500 }
     );
   }
 }
 
-// Get current user's keys
+// Get current user's public key
 export async function GET() {
   try {
     // Authenticate user
@@ -88,31 +75,32 @@ export async function GET() {
     // Connect to database
     await connectToDatabase();
     
-    // Get user with keys
-    const userData = await User.findById(user.userId)
-      .select('+identityKey')
-      .lean();
+    // Get user
+    const userData = await User.findById(user.userId);
     
-    if (!userData || Array.isArray(userData)) {
+    if (!userData) {
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
       );
     }
     
+    if (!userData.publicKey) {
+      return NextResponse.json(
+        { error: 'Public key not found' },
+        { status: 404 }
+      );
+    }
+    
     return NextResponse.json({
       success: true,
-      keys: {
-        identityKey: userData.identityKey,
-        signedPreKey: userData.signedPreKey,
-        oneTimePreKeys: userData.oneTimePreKeys,
-      },
+      publicKey: userData.publicKey,
     });
   } catch (error) {
-    console.error('Get keys error:', error);
+    console.error('Get public key error:', error);
     
     return NextResponse.json(
-      { error: 'Failed to get keys' },
+      { error: 'Failed to get public key' },
       { status: 500 }
     );
   }

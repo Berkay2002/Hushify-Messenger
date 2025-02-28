@@ -3,12 +3,12 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Smile, Paperclip, Image } from 'lucide-react';
+import { Send, Smile, Paperclip, Image, AlertCircle } from 'lucide-react';
 import { useChat } from '../../context/ChatContext';
 import { useAuth } from '../../context/AuthContext';
 import MessageList from './MessageList';
 import ChatHeader from './ChatHeader';
-import { useEncryption } from '../../hooks/useEncryption';
+import { useSecureMessaging } from '../../hooks/useSecureMessaging';
 
 const ChatInterface: React.FC = () => {
   const { activeContact, sendMessage, startTyping, stopTyping } = useChat();
@@ -17,12 +17,12 @@ const ChatInterface: React.FC = () => {
   const [isTyping, setIsTyping] = useState(false);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { encryptMessage } = useEncryption();
+  const { encryptMessage, initialized: encryptionInitialized, error: encryptionError } = useSecureMessaging();
   const [isSending, setIsSending] = useState(false);
 
   // Handle sending messages
   const handleSendMessage = () => {
-    if (!message.trim() || !activeContact || !user || isSending) return;
+    if (!message.trim() || !activeContact || !user || isSending || !encryptionInitialized) return;
 
     setIsSending(true);
     
@@ -42,7 +42,7 @@ const ChatInterface: React.FC = () => {
         handleStopTyping();
       } catch (error) {
         console.error('Failed to send message:', error);
-        // Show error to user
+        // Could show an error toast or notification here
       } finally {
         setIsSending(false);
       }
@@ -112,6 +112,19 @@ const ChatInterface: React.FC = () => {
       {/* Chat header */}
       <ChatHeader contact={activeContact} />
       
+      {/* Encryption status banner - updated */}
+      {!encryptionInitialized && (
+        <div className="bg-yellow-50 p-2 text-sm text-yellow-700 flex items-center justify-center">
+          <span>Initializing secure messaging...</span>
+        </div>
+      )}
+
+      {encryptionError && (
+        <div className="bg-red-50 p-2 text-sm text-red-700 flex items-center justify-center">
+          <span>Encryption error: {encryptionError}</span>
+        </div>
+      )}
+      
       {/* Messages */}
       <MessageList />
       
@@ -140,18 +153,18 @@ const ChatInterface: React.FC = () => {
               onKeyDown={handleKeyPress}
               rows={1}
               style={{ maxHeight: '120px', minHeight: '40px' }}
-              disabled={isSending}
+              disabled={isSending || !encryptionInitialized}
             />
           </div>
           
           <button 
             className={`p-2 ml-2 rounded-full flex items-center justify-center ${
-              message.trim() && !isSending
+              message.trim() && !isSending && encryptionInitialized
                 ? 'bg-blue-600 text-white hover:bg-blue-700' 
                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
             }`}
             onClick={handleSendMessage}
-            disabled={!message.trim() || isSending}
+            disabled={!message.trim() || isSending || !encryptionInitialized}
           >
             <Send className="h-5 w-5" />
           </button>

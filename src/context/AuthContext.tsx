@@ -79,6 +79,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   // Login function
+
   const login = async (email: string, password: string) => {
     setLoading(true);
     
@@ -98,6 +99,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       const data = await response.json();
       setUser(data.user);
+      
+      // Generate and store encryption keys after login
+      try {
+        // Import dynamically to avoid SSR issues
+        const { encryptionService } = await import('../lib/encryptionService');
+        const keyPair = encryptionService.generateKeyPair();
+        
+        // Send public key to server
+        await fetch('/api/keys', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            publicKey: keyPair.publicKey
+          }),
+        });
+        
+        console.log('Encryption keys generated and stored');
+      } catch (keyError) {
+        console.error('Failed to initialize encryption keys:', keyError);
+        // Don't fail the login process if key generation fails
+      }
+      
       router.push('/chat');
     } catch (error) {
       console.error('Login error:', error);

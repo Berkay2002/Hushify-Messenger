@@ -9,16 +9,7 @@ export interface IUser extends Document {
   status?: string;
   isOnline: boolean;
   lastSeen: Date;
-  identityKey?: string;
-  signedPreKey?: {
-    keyId: number;
-    publicKey: string;
-    signature: string;
-  };
-  oneTimePreKeys?: Array<{
-    keyId: number;
-    publicKey: string;
-  }>;
+  publicKey?: string;  // Added publicKey field for E2EE
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
@@ -65,31 +56,10 @@ const UserSchema = new Schema<IUser>(
       type: Date,
       default: Date.now,
     },
-    identityKey: {
+    publicKey: {
       type: String,
-      select: false, // Don't return identity key by default
+      // This is now the main field for E2EE
     },
-    signedPreKey: {
-      keyId: {
-        type: Number,
-      },
-      publicKey: {
-        type: String,
-      },
-      signature: {
-        type: String,
-      },
-    },
-    oneTimePreKeys: [
-      {
-        keyId: {
-          type: Number,
-        },
-        publicKey: {
-          type: String,
-        },
-      },
-    ],
   },
   { timestamps: true }
 );
